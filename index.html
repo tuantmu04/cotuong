@@ -130,6 +130,8 @@ code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
 .pc.sel .pc-o{stroke:#2f7de1;stroke-width:4}
 .pc.chk .pc-o{stroke:#e2504a;stroke-width:5}
 .pc.moved{animation:pop .25s ease-out}
+.pc.aipick .pc-o{stroke:#e0a64a;stroke-width:5}
+.pc.ghost{pointer-events:none}
 @keyframes pop{from{transform:var(--t) scale(1.18)}to{transform:var(--t) scale(1)}}
 .lastsq{fill:none;stroke:#2f7de1;stroke-width:2.5;stroke-dasharray:5 4;opacity:.8}
 .tgt{fill:#2f7de1;opacity:.55}
@@ -172,6 +174,8 @@ code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
           <select id="selLabels"><option value="han">Chữ Hán</option><option value="vn">Tiếng Việt</option></select></label>
         <label class="sel">Engine
           <select id="selEngine"><option value="pika">Pikafish (mạnh nhất)</option><option value="js">Tích hợp (JS)</option></select></label>
+        <label class="sel">Tốc độ máy đi
+          <select id="selSpeed"><option value="fast">Nhanh</option><option value="normal">Vừa</option><option value="slow">Chậm (dễ theo dõi)</option></select></label>
       </div>
       <div class="eng" id="engState" style="margin:-2px 0 8px"></div>
       <div class="row">
@@ -714,6 +718,8 @@ var XQ = (function () {
     hard: { time: 2000, depth: 30, pika: { movetime: 1000 } },
     expert: { time: 5000, depth: 30, pika: { movetime: 3000 } }
   };
+  // Nhịp đi của máy: think = thời gian tối thiểu từ lúc bạn đi tới lúc máy đi, hold = thời gian đánh dấu quân máy sắp đi, slide = thời gian quân trượt
+  var SPEED = { fast: { think: 250, hold: 0, slide: 220 }, normal: { think: 900, hold: 500, slide: 480 }, slow: { think: 1600, hold: 900, slide: 750 } };
   var COACH_TIME = 1500, COACH_PIKA = { movetime: 1500, multipv: 3 };
   var M0 = 50, CELL = 60;
 
@@ -756,6 +762,7 @@ var XQ = (function () {
   var st = {
     pos: new Pos(), human: load('human', RED), level: load('level', 'medium'), labels: load('labels', 'han'),
     autoHint: load('autoHint', true), showArrow: load('showArrow', true), autoLLM: load('autoLLM', false),
+    speed: load('speed', 'normal'), aiPick: -1, anim: null,
     engine: load('engine', 'pika'), pikaOk: false, pikaName: '', pikaErr: '',
     history: [], sel: -1, targets: [], coach: null, warnings: [], aiNote: null, userNote: null,
     thinking: null, over: null, gen: 0, lastScore: null, chat: [], startFen: START,
@@ -1016,6 +1023,9 @@ var XQ = (function () {
   function isHumanTurn() { return !st.over && st.pos.side === st.human; }
   function record(m, by) {
     var pos = st.pos, n = notate(pos.b, m), fen = pos.fen(), side = pos.side;
+    var sp = SPEED[st.speed] || SPEED.normal;
+    st.anim = { from: m >> 7, to: m & 127, cap: pos.b[m & 127], start: performance.now(), dur: by === 'ai' ? sp.slide : 180 };
+    requestAnimationFrame(animStep);
     pos.make(m);
     var rec = { m: m, fen: fen, side: side, by: by, n: n };
     st.history.push(rec); st.sel = -1; st.targets = [];
@@ -1041,14 +1051,27 @@ var XQ = (function () {
     var g = st.gen, lv = LEVELS[st.level];
     st.thinking = 'ai'; renderStatus();
     var fen = st.pos.fen();
+    var t0 = Date.now();
     engine(req(lv.mode || 'think', lv.time, lv.depth, lv.pika)).then(function (res) {
       if (g !== st.gen) return;
-      st.thinking = null;
-      if (!res.move) { checkOver(); renderAll(); return; }
-      var last = st.history[st.history.length - 1];
-      if (last && last.by === 'human') reviewHuman(last, -res.score);
+      if (!res.move) { st.thinking = null; checkOver(); renderAll(); return; }
       var bk = bookFor(st.pos), bookOpt = null;
       if (bk) { bookOpt = bk[(Math.random() * bk.length) | 0]; res.move = bookOpt.m; }
+      // Làm chậm nhịp: chờ đủ thời gian tối thiểu → đánh dấu quân sắp đi → cho quân trượt sang ô mới
+      var sp = SPEED[st.speed] || SPEED.normal;
+      setTimeout(function () {
+        if (g !== st.gen) return;
+        st.aiPick = res.move >> 7; renderBoard();
+        setTimeout(function () {
+          if (g !== st.gen) return;
+          st.aiPick = -1; st.thinking = null;
+          finishAi(res, bookOpt);
+        }, sp.hold);
+      }, Math.max(0, sp.think - (Date.now() - t0)));
+    }).catch(function (e) { if (e.message !== 'cancel') { console.error(e); st.thinking = null; renderAll(); } });
+    function finishAi(res, bookOpt) {
+      var last = st.history[st.history.length - 1];
+      if (last && last.by === 'human') reviewHuman(last, -res.score);
       var facts = explain(fen, res.move, res);
       if (bookOpt) facts.unshift({ ic: '📚', text: 'Khai cuộc “' + bookOpt.name + '”: ' + bookOpt.why });
       var b0 = st.pos.b, pickLine = null;
@@ -1064,7 +1087,7 @@ var XQ = (function () {
       st.aiNote = rec;
       nextTurn();
       if (st.autoLLM && llmReady()) llmExplainAi();
-    }).catch(function (e) { if (e.message !== 'cancel') { console.error(e); st.thinking = null; renderAll(); } });
+    }
   }
   function reviewHuman(rec, scoreAfter) {
     var c = rec.coachBefore;
@@ -1120,7 +1143,7 @@ var XQ = (function () {
     nextTurn();
   }
   function newGame(fen) {
-    st.gen++; if (busy()) resetEngine();
+    st.gen++; st.aiPick = -1; st.anim = null; if (busy()) resetEngine();
     var p = new Pos();
     try { p.setFEN(fen || START); } catch (e) { alert('FEN không hợp lệ: ' + e.message); return; }
     st.pos = p; st.startFen = fen || START;
@@ -1131,7 +1154,7 @@ var XQ = (function () {
   }
   function undo() {
     if (!st.history.length) return;
-    st.gen++; if (busy()) resetEngine();
+    st.gen++; st.aiPick = -1; st.anim = null; if (busy()) resetEngine();
     st.thinking = null;
     do { st.pos.unmake(); st.history.pop(); } while (st.history.length && st.pos.side !== st.human);
     st.over = null; st.coach = null; st.aiNote = null; st.userNote = null; st.sel = -1; st.targets = [];
@@ -1159,6 +1182,18 @@ var XQ = (function () {
       st.targets = st.pos.legalMoves().filter(function (m) { return (m >> 7) === sq; });
     } else { st.sel = -1; st.targets = []; }
     renderBoard();
+  }
+  function animStep() {
+    var an = st.anim; if (!an) return;
+    var k = (performance.now() - an.start) / an.dur;
+    if (k >= 1) { st.anim = null; renderBoard(); return; }
+    var e = 1 - Math.pow(1 - Math.max(0, k), 3), el = document.getElementById('animPc');
+    if (el) {
+      var x = +el.dataset.x1 + (el.dataset.x2 - el.dataset.x1) * e, y = +el.dataset.y1 + (el.dataset.y2 - el.dataset.y1) * e;
+      el.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+    }
+    var gh = document.getElementById('animGhost'); if (gh) gh.setAttribute('opacity', String(1 - e * 0.8));
+    requestAnimationFrame(animStep);
   }
   function renderBoard() {
     var flip = st.human === BLACK;
@@ -1201,17 +1236,29 @@ var XQ = (function () {
     });
     var b = st.pos.b, chkSq = -1;
     if (!st.over && st.pos.inCheck(st.pos.side)) chkSq = st.pos.kpos[st.pos.side];
-    for (var sq = 0; sq < 90; sq++) {
-      var p = b[sq]; if (!p) continue;
-      var x = X(sq % 9), y = Y((sq / 9) | 0), cls = 'pc ' + (p > 8 ? 'blk' : 'red');
-      if (sq === st.sel) cls += ' sel';
-      if (sq === chkSq) cls += ' chk';
-      if (last && sq === (last.m & 127)) cls += ' moved';
+    var an = st.anim && performance.now() < st.anim.start + st.anim.dur ? st.anim : null;
+    function pieceSvg(p, x, y, cls, extra) {
       var label, tcls;
       if (st.labels === 'han') { label = HAN[p]; tcls = 'han'; }
       else { label = VNW[p & 7]; tcls = 'vn'; }
       var fs = st.labels === 'han' ? '' : ' style="font-size:' + (label.length > 4 ? 12 : label.length > 3 ? 13.5 : 16) + 'px"';
-      h += '<g class="' + cls + '" style="--t:translate(' + x + 'px,' + y + 'px)" transform="translate(' + x + ',' + y + ')"><circle r="27" class="pc-o"/><circle r="22.5" class="pc-i"/><text class="' + tcls + '"' + fs + ' y="1">' + label + '</text></g>';
+      return '<g class="' + cls + '"' + (extra || '') + ' style="--t:translate(' + x + 'px,' + y + 'px)" transform="translate(' + x + ',' + y + ')"><circle r="27" class="pc-o"/><circle r="22.5" class="pc-i"/><text class="' + tcls + '"' + fs + ' y="1">' + label + '</text></g>';
+    }
+    for (var sq = 0; sq < 90; sq++) {
+      var p = b[sq]; if (!p) continue;
+      if (an && sq === an.to) continue; // quân đang trượt vẽ sau cùng
+      var x = X(sq % 9), y = Y((sq / 9) | 0), cls = 'pc ' + (p > 8 ? 'blk' : 'red');
+      if (sq === st.sel) cls += ' sel';
+      if (sq === chkSq) cls += ' chk';
+      if (sq === st.aiPick) cls += ' aipick';
+      if (!an && last && sq === (last.m & 127)) cls += ' moved';
+      h += pieceSvg(p, x, y, cls);
+    }
+    if (an) {
+      var ax = X(an.to % 9), ay = Y((an.to / 9) | 0);
+      if (an.cap) h += pieceSvg(an.cap, ax, ay, 'pc ghost ' + (an.cap > 8 ? 'blk' : 'red'), ' id="animGhost"');
+      var mp = b[an.to];
+      if (mp) h += pieceSvg(mp, X(an.from % 9), Y((an.from / 9) | 0), 'pc ' + (mp > 8 ? 'blk' : 'red') + (an.to === chkSq ? ' chk' : ''), ' id="animPc" data-x1="' + X(an.from % 9) + '" data-y1="' + Y((an.from / 9) | 0) + '" data-x2="' + ax + '" data-y2="' + ay + '"');
     }
     st.targets.forEach(function (m) {
       var t = m & 127, x = X(t % 9), y = Y((t / 9) | 0);
@@ -1574,10 +1621,12 @@ var XQ = (function () {
   $('tgAuto').checked = st.autoHint; $('tgArrow').checked = st.showArrow; $('tgLLM').checked = st.autoLLM;
   $('selSide').onchange = function () { st.human = +this.value; save('human', st.human); newGame(START); };
   $('selLevel').onchange = function () { st.level = this.value; save('level', st.level); };
+  $('selSpeed').value = st.speed;
+  $('selSpeed').onchange = function () { st.speed = this.value; save('speed', st.speed); };
   $('selEngine').value = st.engine;
   $('selEngine').onchange = function () {
     st.engine = this.value; save('engine', st.engine); renderEngState();
-    if (isHumanTurn()) { st.gen++; if (busy()) resetEngine(); st.coach = null; coachAnalyze(false); }
+    if (isHumanTurn()) { st.gen++; st.aiPick = -1; st.anim = null; if (busy()) resetEngine(); st.coach = null; coachAnalyze(false); }
   };
   $('selLabels').onchange = function () { st.labels = this.value; save('labels', st.labels); renderBoard(); };
   $('tgAuto').onchange = function () { st.autoHint = this.checked; save('autoHint', st.autoHint); if (st.autoHint && isHumanTurn() && !st.coach) coachAnalyze(true); else renderAll(); };
