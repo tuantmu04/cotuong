@@ -1,0 +1,6 @@
+pikafish/
+config.json
+node_modules/
+.git/
+*.zip
+*.7z

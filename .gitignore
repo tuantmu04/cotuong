@@ -1,0 +1,6 @@
+# Không đưa key và file Pikafish lên GitHub
+config.json
+pikafish/
+node_modules/
+*.zip
+*.7z

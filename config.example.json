@@ -1,0 +1,16 @@
+{
+  "url": "https://<ten-resource>.services.ai.azure.com/openai/v1/responses",
+  "key": "<API key cua Foundry>",
+  "model": "<ten deployment, vd gpt-5-mini>",
+  "auth": "api-key",
+  "port": 8080,
+
+  "password": "",
+  "chatLimitPerHour": 60,
+
+  "pikafishPath": "",
+  "pikafishNnue": "",
+  "pikafishInstances": 1,
+  "pikafishThreads": 2,
+  "pikafishHash": 128
+}
