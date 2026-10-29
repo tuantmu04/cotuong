@@ -19,6 +19,21 @@ button,select,input,textarea{font:inherit;color:inherit}
 .app{display:grid;grid-template-columns:minmax(320px,1fr) minmax(340px,480px);grid-template-areas:"top top" "board panel" "board panel2";gap:20px;align-items:start;justify-content:center;padding:18px 16px 40px;max-width:1180px;margin:0 auto}
 header.top{grid-area:top} .board-col{grid-area:board} .panel{grid-area:panel} .panel2{grid-area:panel2}
 @media (max-width:900px){.app{grid-template-columns:1fr;grid-template-areas:"top" "board" "panel" "panel2"}}
+/* Điện thoại: khung cài đặt nằm trên bàn cờ, có nút thu gọn */
+#btnFold{display:none;margin-left:auto}
+@media (max-width:900px){
+  .app{display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:12px 12px 32px}
+  .app > .panel{display:contents}
+  .app > .board-col{width:100%}
+  #setCard > .row:first-child{flex-wrap:nowrap;gap:6px}
+  #setCard > .row:first-child .btn{padding:7px 10px;white-space:nowrap}
+  header.top{order:-2}
+  #setCard{order:-1;padding:10px 12px}
+  #btnFold{display:inline-flex}
+  #setCard.folded .setmore{display:none}
+  #setCard .grid3{margin:8px 0}
+  .evalwrap span#evalTxt{min-width:0!important}
+}
 /* Màn hình rộng: bàn cờ ghim cố định, co theo chiều cao cửa sổ để luôn thấy trọn khi cuộn cột bên phải */
 @media (min-width:901px){
   .board-col{position:sticky;top:14px;width:min(100%,calc((100vh - 130px)*580/640));justify-self:center}
@@ -140,12 +155,14 @@ code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
   </section>
 
   <aside class="panel">
-    <div class="card">
+    <div class="card" id="setCard">
       <div class="row">
         <button class="btn primary" id="btnNew">Ván mới</button>
         <button class="btn" id="btnUndo">↶ Đi lại</button>
         <button class="btn" id="btnHint">💡 Gợi ý</button>
+        <button class="btn" id="btnFold" aria-expanded="true">⚙ Thu gọn</button>
       </div>
+      <div class="setmore">
       <div class="grid3">
         <label class="sel">Bạn cầm
           <select id="selSide"><option value="0">Đỏ (đi trước)</option><option value="1">Đen</option></select></label>
@@ -161,6 +178,7 @@ code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
         <label class="tg"><input type="checkbox" id="tgAuto"> Tự động gợi ý</label>
         <label class="tg"><input type="checkbox" id="tgArrow"> Mũi tên gợi ý</label>
         <label class="tg"><input type="checkbox" id="tgLLM"> Tự hỏi AI Foundry</label>
+      </div>
       </div>
     </div>
 
@@ -1565,6 +1583,12 @@ var XQ = (function () {
   $('tgAuto').onchange = function () { st.autoHint = this.checked; save('autoHint', st.autoHint); if (st.autoHint && isHumanTurn() && !st.coach) coachAnalyze(true); else renderAll(); };
   $('tgArrow').onchange = function () { st.showArrow = this.checked; save('showArrow', st.showArrow); renderBoard(); };
   $('tgLLM').onchange = function () { st.autoLLM = this.checked; save('autoLLM', st.autoLLM); if (st.autoLLM && !llmReady()) openSettings(); };
+  (function () {
+    var card = $('setCard'), btn = $('btnFold');
+    function apply(f) { card.classList.toggle('folded', f); btn.textContent = f ? '⚙ Tùy chọn' : '⚙ Thu gọn'; btn.setAttribute('aria-expanded', String(!f)); }
+    apply(!!load('folded', false));
+    btn.onclick = function () { var f = !card.classList.contains('folded'); save('folded', f); apply(f); };
+  })();
   $('btnFenCopy').onclick = function () { $('fenIn').value = st.pos.fen(); try { navigator.clipboard.writeText(st.pos.fen()); } catch (e) { } };
   $('btnFenLoad').onclick = function () { var f = $('fenIn').value.trim(); if (f) newGame(f); };
 
